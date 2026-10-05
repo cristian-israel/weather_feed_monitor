@@ -1,0 +1,24 @@
+{
+  "_aviso": "EXEMPLO MÍNIMO só para testar o fluxo. Os agrupamentos de região não são oficiais. Gere o real com `pnpm catalogo`.",
+  "estados": {
+    "RS": {
+      "nome": "Rio Grande do Sul",
+      "municipios": [
+        { "nome": "Igrejinha", "regiao": "Região Exemplo A" },
+        { "nome": "Parobé", "regiao": "Região Exemplo A" },
+        { "nome": "Rolante", "regiao": "Região Exemplo A" },
+        { "nome": "Taquara", "regiao": "Região Exemplo A" },
+        { "nome": "Três Coroas", "regiao": "Região Exemplo A" },
+        { "nome": "Porto Alegre", "regiao": "Região Exemplo B" },
+        { "nome": "Canoas", "regiao": "Região Exemplo B" }
+      ]
+    },
+    "SC": {
+      "nome": "Santa Catarina",
+      "municipios": [
+        { "nome": "Florianópolis", "regiao": "Região Exemplo C" },
+        { "nome": "São José", "regiao": "Região Exemplo C" }
+      ]
+    }
+  }
+}

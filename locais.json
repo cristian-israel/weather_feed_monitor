@@ -1,0 +1,8 @@
+[
+  {
+    "municipio": "Parobé",
+    "uf": "RS",
+    "incluirVizinhas": true,
+    "maxDiasLembrete": 7
+  }
+]
