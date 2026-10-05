@@ -1,94 +1,89 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { z } from 'zod';
-import { config } from './config';
-import type { AnaliseIA, Post } from './tipos';
-
-const client = new Anthropic();
+import { GoogleGenAI, Type } from "@google/genai";
+import type { Part } from "@google/genai";
+import { z } from "zod";
+import { config } from "./config";
+import type { AnaliseIA, Post } from "./tipos";
 
 const schema = z.object({
   eh_alerta: z.boolean().default(false),
   tipo_alerta: z.string().nullable().default(null),
-  severidade: z.enum(['baixa', 'media', 'alta']).nullable().default(null),
+  severidade: z.enum(["baixa", "media", "alta"]).nullable().default(null),
   mencoes: z
     .array(
       z.object({
         nome: z.string(),
-        tipo: z.enum(['municipio', 'regiao', 'estado', 'outro']).catch('outro'),
+        tipo: z.enum(["municipio", "regiao", "estado", "outro"]).catch("outro"),
         uf: z.string().nullable().default(null),
       }),
     )
     .default([]),
 });
 
-type MediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
 function normalizarTipo(t: string | null): MediaType {
-  const tipo = (t ?? '').split(';')[0].trim().toLowerCase();
-  if (tipo === 'image/png' || tipo === 'image/gif' || tipo === 'image/webp') return tipo;
-  return 'image/jpeg';
+  const tipo = (t ?? "").split(";")[0].trim().toLowerCase();
+  if (tipo === "image/png" || tipo === "image/gif" || tipo === "image/webp")
+    return tipo;
+  return "image/jpeg";
 }
 
-async function imagemParaBloco(url: string) {
+async function imagemParaBloco(url: string): Promise<Part> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Falha ao baixar imagem (${res.status})`);
-  const data = Buffer.from(await res.arrayBuffer()).toString('base64');
+  const data = Buffer.from(await res.arrayBuffer()).toString("base64");
   return {
-    type: 'image' as const,
-    source: {
-      type: 'base64' as const,
-      media_type: normalizarTipo(res.headers.get('content-type')),
+    inlineData: {
+      mimeType: normalizarTipo(res.headers.get("content-type")),
       data,
     },
   };
 }
 
 function extrairJson(texto: string): unknown {
-  const limpo = texto.replace(/```(?:json)?/gi, '').trim();
-  const ini = limpo.indexOf('{');
-  const fim = limpo.lastIndexOf('}');
-  if (ini === -1 || fim === -1) throw new Error('Resposta do modelo sem JSON');
+  const limpo = texto.replace(/```(?:json)?/gi, "").trim();
+  const ini = limpo.indexOf("{");
+  const fim = limpo.lastIndexOf("}");
+  if (ini === -1 || fim === -1) throw new Error("Resposta do modelo sem JSON");
   return JSON.parse(limpo.slice(ini, fim + 1));
+}
+
+let aiClient: GoogleGenAI | null = null;
+function getAi(): GoogleGenAI {
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey: config.geminiApiKey() });
+  }
+  return aiClient;
 }
 
 /**
  * A IA só EXTRAI os lugares citados. Quem decide se afeta seus municípios
  * (direto, região, estado ou vizinho) é o código, em localizacao.ts.
  */
-export async function analisar(post: Post, ufsInteresse: string[]): Promise<AnaliseIA> {
-  const blocosImagem = [];
+export async function analisar(
+  post: Post,
+  ufsInteresse: string[],
+): Promise<AnaliseIA> {
+  const partes: (Part | string)[] = [];
 
   if (post.screenshot) {
-    blocosImagem.push({
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: 'image/jpeg' as const,
-        data: post.screenshot.toString('base64'),
+    partes.push({
+      inlineData: {
+        mimeType: "image/jpeg",
+        data: post.screenshot.toString("base64"),
       },
     });
   }
 
   for (const url of post.imagemUrls.slice(0, config.maxImagens)) {
     try {
-      blocosImagem.push(await imagemParaBloco(url));
+      partes.push(await imagemParaBloco(url));
     } catch (e) {
       console.warn(`Imagem ignorada (${post.id}):`, (e as Error).message);
     }
   }
 
-  const msg = await client.messages.create({
-    model: config.modelo,
-    max_tokens: 600,
-    system:
-      'Você extrai informações de avisos meteorológicos publicados em redes sociais. Responda APENAS com JSON válido, sem texto extra.',
-    messages: [
-      {
-        role: 'user',
-        content: [
-          ...blocosImagem,
-          {
-            type: 'text',
-            text: `Estados de interesse: ${ufsInteresse.join(', ')}.
+  const promptTexto = `Estados de interesse: ${ufsInteresse.join(", ")}.
 
 Se o post for um aviso meteorológico, liste os lugares onde o fenômeno está previsto ou acontecendo.
 Regras:
@@ -101,14 +96,50 @@ Regras:
 Retorne: {"eh_alerta": boolean, "tipo_alerta": string|null, "severidade": "baixa"|"media"|"alta"|null, "mencoes": [{"nome": string, "tipo": "municipio"|"regiao"|"estado"|"outro", "uf": string|null}]}
 
 Legenda:
-"""${post.legenda}"""`,
+"""${post.legenda}"""`;
+
+  partes.push(promptTexto);
+
+  const ai = getAi();
+  const response = await ai.models.generateContent({
+    model: config.modelo,
+    contents: partes,
+    config: {
+      systemInstruction:
+        "Você extrai informações de avisos meteorológicos publicados em redes sociais. Responda APENAS com JSON válido, sem texto extra.",
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          eh_alerta: { type: Type.BOOLEAN },
+          tipo_alerta: { type: Type.STRING, nullable: true },
+          severidade: {
+            type: Type.STRING,
+            enum: ["baixa", "media", "alta"],
+            nullable: true,
           },
-        ],
+          mencoes: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                nome: { type: Type.STRING },
+                tipo: {
+                  type: Type.STRING,
+                  enum: ["municipio", "regiao", "estado", "outro"],
+                },
+                uf: { type: Type.STRING, nullable: true },
+              },
+              required: ["nome", "tipo"],
+            },
+          },
+        },
+        required: ["eh_alerta", "mencoes"],
       },
-    ],
+      maxOutputTokens: 1000,
+    },
   });
 
-  const bloco = msg.content.find((b) => b.type === 'text');
-  const texto = bloco && bloco.type === 'text' ? bloco.text : '';
+  const texto = response.text ?? "";
   return schema.parse(extrairJson(texto));
 }

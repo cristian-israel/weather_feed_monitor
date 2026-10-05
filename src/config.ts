@@ -9,7 +9,8 @@ function obrigatoria(nome: string): string {
 export const config = {
   perfil: process.env.PERFIL ?? '',
   fonte: (process.env.FONTE ?? 'playwright') as 'playwright' | 'mock',
-  modelo: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
+  modelo: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  geminiApiKey: () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || obrigatoria('GEMINI_API_KEY'),
   sessaoPath: process.env.SESSAO_PATH ?? 'sessao.json',
   maxImagens: Number(process.env.MAX_IMAGENS ?? 4),
 
